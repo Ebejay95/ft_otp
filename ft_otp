@@ -8,7 +8,7 @@ import hashlib
 from colorama import Fore, Style
 from cryptography.fernet import Fernet
 
-FERNETKEY = "b'-3WsfLYsZ8DFgrdVV9xhmCh-ftABZffQJaYPc0zKKV0='"
+FERNETKEY = b'-3WsfLYsZ8DFgrdVV9xhmCh-ftABZffQJaYPc0zKKV0='
 
 def check_hexa_dec(value):
     if not isinstance(value, str) or not all(c in "0123456789abcdefABCDEF" for c in value):
@@ -41,6 +41,17 @@ def read_key_file(filepath):
         return content
     except IOError as e:
         print(f"{Fore.RED}Error reading file: {e}{Style.RESET_ALL}", file=sys.stderr)
+        sys.exit(1)
+
+def write_key_file(content: bytes):
+    try:
+        with open('ft_otp.key', 'wb') as file:
+            file.write(content)
+    except PermissionError:
+        print(f"{Fore.RED}Error: Permission denied writing to ft_otp.key{Style.RESET_ALL}", file=sys.stderr)
+        sys.exit(1)
+    except IOError as e:
+        print(f"{Fore.RED}Error writing file: {e}{Style.RESET_ALL}", file=sys.stderr)
         sys.exit(1)
 
 def encrypt_fernet(message: str, key: bytes) -> bytes:
@@ -90,12 +101,15 @@ def main():
     if args.g:
         print(f"\n{Fore.CYAN}Generating keyfile ft_otp.key...{Style.RESET_ALL}")
         print(f"Seed: {Fore.YELLOW}{args.g}{Style.RESET_ALL}")
-        print(encrypt_fernet(args.g))
+        write_key_file(encrypt_fernet(args.g, FERNETKEY))
         print(f"{Fore.GREEN}Success!{Style.RESET_ALL}")
     elif args.k:
         print(f"\n{Fore.CYAN}Generating OTP from the keyfile ft_otp.key...{Style.RESET_ALL}")
         print(f"File: {Fore.YELLOW}{args.k}{Style.RESET_ALL}")
-        print(read_key_file(args.k))
+        decrypted_key = decrypt_fernet(read_key_file(args.k), FERNETKEY)
+        current_time = str(int(time.time())).encode()
+        otp = hmac_sha1(decrypted_key.encode(), current_time)
+        print(f"OTP: {Fore.YELLOW}{otp}{Style.RESET_ALL}")
         print(f"{Fore.GREEN}Success!{Style.RESET_ALL}")
     else:
         print(f"{Fore.RED}Error: Either option -g or -k has to be given.{Style.RESET_ALL}", file=sys.stderr)
