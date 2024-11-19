@@ -1,0 +1,5 @@
+altgraph==0.17.4
+packaging==24.2
+pyinstaller==6.11.1
+colorama==0.4.6
+pyinstaller-hooks-contrib==2024.10

@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+
+import sys
+import os
+import time
+import argparse
+import hashlib
+from colorama import Fore, Style
+from cryptography.fernet import Fernet
+
+FERNETKEY = "b'-3WsfLYsZ8DFgrdVV9xhmCh-ftABZffQJaYPc0zKKV0='"
+
+def check_hexa_dec(value):
+    if not isinstance(value, str) or not all(c in "0123456789abcdefABCDEF" for c in value):
+        raise argparse.ArgumentTypeError(f"{value} is not a valid hexadecimal string.")
+    if len(value) < 64:
+        raise argparse.ArgumentTypeError(f"{value} must contain at least 64 characters.")
+    
+    if not (value.isupper() or value.islower() or value.isdigit()):
+        raise argparse.ArgumentTypeError(f"{value} must not mix uppercase and lowercase letters.")
+    return value
+
+def check_keypath(value):
+    if not isinstance(value, str):
+        raise argparse.ArgumentTypeError("Path must be a string")
+    expected_name = "ft_otp.key"
+    basename = os.path.basename(value)
+    if basename != expected_name:
+        raise argparse.ArgumentTypeError(f"Filename must be '{expected_name}'")
+    if not os.path.isfile(value):
+        raise argparse.ArgumentTypeError(f"'{value}' is not a valid file")
+    if not os.access(value, os.R_OK):
+        raise argparse.ArgumentTypeError(f"No read permission for '{value}'")
+        
+    return value
+
+def read_key_file(filepath):
+    try:
+        with open(filepath, 'r') as file:
+            content = file.read().strip()
+        return content
+    except IOError as e:
+        print(f"{Fore.RED}Error reading file: {e}{Style.RESET_ALL}", file=sys.stderr)
+        sys.exit(1)
+
+def encrypt_fernet(message: str, key: bytes) -> bytes:
+    f = Fernet(key)
+    return f.encrypt(message.encode())
+
+def decrypt_fernet(encrypted_message: bytes, key: bytes) -> str:
+    f = Fernet(key)
+    return f.decrypt(encrypted_message).decode()
+
+def hmac_sha1(key, message):
+    block_size = 64
+    
+    if len(key) > block_size:
+        key = hashlib.sha1(key).digest()
+    key = key.ljust(block_size, b'\x00')
+
+    ipad = bytes((x ^ 0x36) for x in key)
+    opad = bytes((x ^ 0x5C) for x in key)
+
+    inner_hash = hashlib.sha1(ipad + message).digest()
+    hmac_result = hashlib.sha1(opad + inner_hash).hexdigest()
+
+    return hmac_result
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="FT_OTP: Generates one-time passwords (TOTP/HOTP)."
+    )
+    parser.add_argument(
+        "-g",
+        type=check_hexa_dec,
+        help="Hexadecimal key, which is saved in ft_otp.key file."
+    )
+    parser.add_argument(
+        "-k",
+        type=check_keypath,
+        help="Path to ft_otp.key, for generating OTPs.",
+    )
+    
+    args = parser.parse_args()
+    
+    if args.g and args.k:
+        print(f"{Fore.RED}Error: Only one of the options -g or -k has to be given.{Style.RESET_ALL}", file=sys.stderr)
+        sys.exit(1)
+    
+    if args.g:
+        print(f"\n{Fore.CYAN}Generating keyfile ft_otp.key...{Style.RESET_ALL}")
+        print(f"Seed: {Fore.YELLOW}{args.g}{Style.RESET_ALL}")
+        print(encrypt_fernet(args.g))
+        print(f"{Fore.GREEN}Success!{Style.RESET_ALL}")
+    elif args.k:
+        print(f"\n{Fore.CYAN}Generating OTP from the keyfile ft_otp.key...{Style.RESET_ALL}")
+        print(f"File: {Fore.YELLOW}{args.k}{Style.RESET_ALL}")
+        print(read_key_file(args.k))
+        print(f"{Fore.GREEN}Success!{Style.RESET_ALL}")
+    else:
+        print(f"{Fore.RED}Error: Either option -g or -k has to be given.{Style.RESET_ALL}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
