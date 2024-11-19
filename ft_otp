@@ -99,6 +99,7 @@ def main():
         sys.exit(1)
     
     if args.g:
+        TODO mache ein file abfrage nicht nur den string sondern als file dass den SEED nenhaellt!
         print(f"\n{Fore.CYAN}Generating keyfile ft_otp.key...{Style.RESET_ALL}")
         print(f"Seed: {Fore.YELLOW}{args.g}{Style.RESET_ALL}")
         write_key_file(encrypt_fernet(args.g, FERNETKEY))
