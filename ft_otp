@@ -93,13 +93,13 @@ def hmac_sha1(key, message):
     # This prepares the key for the first stage of hashing.
     ipad = bytes((x ^ 0x36) for x in key)
 
-    # Compute the outer padding (opad) by XORing the key with the constant 0x5C.
-    # This prepares the key for the second stage of hashing.
-    opad = bytes((x ^ 0x5C) for x in key)
-
     # Perform the first stage of hashing:
     # Concatenate the inner padding (ipad) with the message, then hash it using SHA-1.
     inner_hash = hashlib.sha1(ipad + message).digest()
+
+    # Compute the outer padding (opad) by XORing the key with the constant 0x5C.
+    # This prepares the key for the second stage of hashing.
+    opad = bytes((x ^ 0x5C) for x in key)
 
     # Perform the second stage of hashing:
     # Concatenate the outer padding (opad) with the result of the inner hash, then hash it using SHA-1.
