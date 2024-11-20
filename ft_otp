@@ -8,6 +8,8 @@ import hashlib
 from colorama import Fore, Style
 from cryptography.fernet import Fernet
 import qrcode
+import secrets
+import base64
 
 FERNETKEY = b'-3WsfLYsZ8DFgrdVV9xhmCh-ftABZffQJaYPc0zKKV0='
 
@@ -126,6 +128,13 @@ def generate_qr_code(data: str):
     qr.make(fit=True)
     return qr
 
+def generate_hex_key(length=64):
+    return secrets.token_hex(length // 2)
+
+def hex_to_base32(hex_key):
+    key_bytes = bytes.fromhex(hex_key)
+    return base64.b32encode(key_bytes).decode('utf-8')
+
 def main():
     parser = argparse.ArgumentParser(
         description="FT_OTP: Generates one-time passwords (TOTP/HOTP)."
@@ -140,11 +149,16 @@ def main():
         type=check_keypath,
         help="Path to ft_otp.key, for generating OTPs.",
     )
+    parser.add_argument(
+        "-s",
+        action="store_true",
+        help="Generate a new 64-character hexadecimal key and save it in ft_otp.key."
+    )
     
     args = parser.parse_args()
     
-    if args.g and args.k:
-        print(f"{Fore.RED}Error: Only one of the options -g or -k has to be given.{Style.RESET_ALL}", file=sys.stderr)
+    if sum(bool(x) for x in [args.g, args.k, args.s]) != 1:
+        print(f"{Fore.RED}Error: Exactly one of the options -g, -k, or -s must be given.{Style.RESET_ALL}", file=sys.stderr)
         sys.exit(1)
     
     if args.g:
@@ -152,10 +166,6 @@ def main():
         if check_hexa_dec(hexacode):
             write_key_file(encrypt_fernet(hexacode, FERNETKEY))
             print(f"{Fore.GREEN}Key was successfully saved in ft_otp.key{Style.RESET_ALL}")
-
-            print(f"{Fore.CYAN}Here is your QR Code for the key:{Style.RESET_ALL}")
-            qr = generate_qr_code(hexacode)
-            qr.print_ascii()
     elif args.k:
         encrypted_key = read_from_file(args.k)
         decrypted_key = decrypt_fernet(encrypted_key, FERNETKEY)
@@ -177,8 +187,18 @@ def main():
         # The result is a 6-digit time-based one-time password.
         otp = hmac_sha1(key_bytes, counter_bytes)
         print(f"{Fore.YELLOW}{otp}{Style.RESET_ALL}")
+    elif args.s:
+        new_key = generate_hex_key()
+        write_key_file(encrypt_fernet(new_key, FERNETKEY))
+        print(f"{Fore.GREEN}New key generated and saved in ft_otp.key{Style.RESET_ALL}")
+    
+        base32_key = hex_to_base32(new_key)
+        qr_data = f"otpauth://totp/ft_otp:?secret={base32_key}&issuer=ft_otp"
+        print(f"{Fore.CYAN}Here is your QR Code for the Authenticator app:{Style.RESET_ALL}")
+        qr = generate_qr_code(qr_data)
+        qr.print_ascii()
     else:
-        print(f"{Fore.RED}Error: Either option -g or -k has to be given.{Style.RESET_ALL}", file=sys.stderr)
+        print(f"{Fore.RED}Error: Either option -g -k or -s has to be given.{Style.RESET_ALL}", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":
