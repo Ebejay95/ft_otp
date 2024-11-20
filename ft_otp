@@ -7,17 +7,15 @@ import argparse
 import hashlib
 from colorama import Fore, Style
 from cryptography.fernet import Fernet
+import qrcode
 
 FERNETKEY = b'-3WsfLYsZ8DFgrdVV9xhmCh-ftABZffQJaYPc0zKKV0='
 
 def check_hexa_dec(value):
-    if not isinstance(value, str) or not all(c in "0123456789abcdefABCDEF" for c in value):
+    if not isinstance(value, str) or not all(c in "0123456789abcdef" for c in value.lower()):
         raise argparse.ArgumentTypeError(f"{value} is not a valid hexadecimal string.")
     if len(value) < 64:
         raise argparse.ArgumentTypeError(f"{value} must contain at least 64 characters.")
-    
-    if not (value.isupper() or value.islower() or value.isdigit()):
-        raise argparse.ArgumentTypeError(f"{value} must not mix uppercase and lowercase letters.")
     return value
 
 def check_keypath(value):
@@ -31,14 +29,29 @@ def check_keypath(value):
         raise argparse.ArgumentTypeError(f"'{value}' is not a valid file")
     if not os.access(value, os.R_OK):
         raise argparse.ArgumentTypeError(f"No read permission for '{value}'")
-        
+    return value
+    
+def check_hexpath(value):
+    if not isinstance(value, str):
+        raise argparse.ArgumentTypeError("Path must be a string")
+    expected_name = "key.hex"
+    basename = os.path.basename(value)
+    if basename != expected_name:
+        raise argparse.ArgumentTypeError(f"Filename must be '{expected_name}'")
+    if not os.path.isfile(value):
+        raise argparse.ArgumentTypeError(f"'{value}' is not a valid file")
+    if not os.access(value, os.R_OK):
+        raise argparse.ArgumentTypeError(f"No read permission for '{value}'")
     return value
 
-def read_key_file(filepath):
+def read_from_file(filepath):
     try:
-        with open(filepath, 'r') as file:
-            content = file.read().strip()
-        return content
+        if filepath.endswith('.key'):
+            with open(filepath, 'rb') as file:
+                return file.read()
+        else:
+            with open(filepath, 'r') as file:
+                return file.read().strip()
     except IOError as e:
         print(f"{Fore.RED}Error reading file: {e}{Style.RESET_ALL}", file=sys.stderr)
         sys.exit(1)
@@ -63,19 +76,55 @@ def decrypt_fernet(encrypted_message: bytes, key: bytes) -> str:
     return f.decrypt(encrypted_message).decode()
 
 def hmac_sha1(key, message):
+    # Block size for the HMAC algorithm (specific to SHA-1, which uses a 64-byte block size).
     block_size = 64
-    
+
+    # Adjust the key to the required block size:
+    # If the key is longer than the block size, hash it using SHA-1 to reduce it to 20 bytes.
+    # This ensures compatibility and avoids potential security risks from directly truncating the key.
     if len(key) > block_size:
         key = hashlib.sha1(key).digest()
+
+    # Pad the key with zero bytes to make it exactly 64 bytes long if it is shorter.
+    # This is necessary for the XOR operations in the next steps.
     key = key.ljust(block_size, b'\x00')
 
+    # Compute the inner padding (ipad) by XORing the key with the constant 0x36.
+    # This prepares the key for the first stage of hashing.
     ipad = bytes((x ^ 0x36) for x in key)
+
+    # Compute the outer padding (opad) by XORing the key with the constant 0x5C.
+    # This prepares the key for the second stage of hashing.
     opad = bytes((x ^ 0x5C) for x in key)
 
+    # Perform the first stage of hashing:
+    # Concatenate the inner padding (ipad) with the message, then hash it using SHA-1.
     inner_hash = hashlib.sha1(ipad + message).digest()
-    hmac_result = hashlib.sha1(opad + inner_hash).hexdigest()
 
-    return hmac_result
+    # Perform the second stage of hashing:
+    # Concatenate the outer padding (opad) with the result of the inner hash, then hash it using SHA-1.
+    hmac_result = hashlib.sha1(opad + inner_hash).digest()
+
+    # Dynamic truncation:
+    # Use the last nibble (4 bits) of the final HMAC result to determine an offset.
+    # This offset selects the starting point for extracting 4 bytes from the HMAC result.
+    offset = hmac_result[-1] & 0xf
+
+    # Extract 4 bytes from the HMAC result starting at the calculated offset.
+    dbc = hmac_result[offset:offset+4]
+
+    # Convert the extracted 4 bytes into a 31-bit integer (positive by masking with 0x7FFFFFFF).
+    binary = int.from_bytes(dbc, 'big') & 0x7fffffff
+
+    # Calculate the 6-digit OTP by taking the integer modulo 1,000,000.
+    # The result is formatted as a zero-padded string to ensure it is exactly 6 digits.
+    return format(binary % 1000000, '06d')
+
+def generate_qr_code(data: str):
+    qr = qrcode.QRCode()
+    qr.add_data(data)
+    qr.make(fit=True)
+    return qr
 
 def main():
     parser = argparse.ArgumentParser(
@@ -83,8 +132,8 @@ def main():
     )
     parser.add_argument(
         "-g",
-        type=check_hexa_dec,
-        help="Hexadecimal key, which is saved in ft_otp.key file."
+        type=check_hexpath,
+        help="Path to key.hex, which content should be Hexadecimal key, which is saved in ft_otp.key file."
     )
     parser.add_argument(
         "-k",
@@ -99,19 +148,35 @@ def main():
         sys.exit(1)
     
     if args.g:
-        TODO mache ein file abfrage nicht nur den string sondern als file dass den SEED nenhaellt!
-        print(f"\n{Fore.CYAN}Generating keyfile ft_otp.key...{Style.RESET_ALL}")
-        print(f"Seed: {Fore.YELLOW}{args.g}{Style.RESET_ALL}")
-        write_key_file(encrypt_fernet(args.g, FERNETKEY))
-        print(f"{Fore.GREEN}Success!{Style.RESET_ALL}")
+        hexacode = read_from_file(args.g)
+        if check_hexa_dec(hexacode):
+            write_key_file(encrypt_fernet(hexacode, FERNETKEY))
+            print(f"{Fore.GREEN}Key was successfully saved in ft_otp.key{Style.RESET_ALL}")
+
+            print(f"{Fore.CYAN}Here is your QR Code for the key:{Style.RESET_ALL}")
+            qr = generate_qr_code(hexacode)
+            qr.print_ascii()
     elif args.k:
-        print(f"\n{Fore.CYAN}Generating OTP from the keyfile ft_otp.key...{Style.RESET_ALL}")
-        print(f"File: {Fore.YELLOW}{args.k}{Style.RESET_ALL}")
-        decrypted_key = decrypt_fernet(read_key_file(args.k), FERNETKEY)
-        current_time = str(int(time.time())).encode()
-        otp = hmac_sha1(decrypted_key.encode(), current_time)
-        print(f"OTP: {Fore.YELLOW}{otp}{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}Success!{Style.RESET_ALL}")
+        encrypted_key = read_from_file(args.k)
+        decrypted_key = decrypt_fernet(encrypted_key, FERNETKEY)
+        
+        key_bytes = bytes.fromhex(decrypted_key)
+        
+        # Generate a counter value based on the current time:
+        # TOTP uses the Unix timestamp divided by 30-second intervals to calculate the counter.
+        # This ensures that the OTP changes every 30 seconds.
+        counter = int(time.time()) // 30
+
+        # Convert the counter value to an 8-byte big-endian representation:
+        # HMAC requires the counter as a binary value, and it must be 8 bytes long.
+        # Big-endian format ensures that the most significant byte comes first.
+        counter_bytes = counter.to_bytes(8, 'big')
+
+        # Generate the OTP:
+        # Use the HMAC-SHA1 function with the secret key (key_bytes) and the counter (counter_bytes).
+        # The result is a 6-digit time-based one-time password.
+        otp = hmac_sha1(key_bytes, counter_bytes)
+        print(f"{Fore.YELLOW}{otp}{Style.RESET_ALL}")
     else:
         print(f"{Fore.RED}Error: Either option -g or -k has to be given.{Style.RESET_ALL}", file=sys.stderr)
         sys.exit(1)

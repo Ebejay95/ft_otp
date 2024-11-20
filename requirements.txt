@@ -12,6 +12,7 @@ pillow==11.0.0
 pycparser==2.22
 pyinstaller==6.11.1
 pyinstaller-hooks-contrib==2024.10
+qrcode==8.0
 requests==2.32.3
 setuptools==75.5.0
 soupsieve==2.6
